@@ -3,6 +3,8 @@ export interface CellChange {
   alive: boolean;
 }
 
+const MAX_DIMENSION = 10_000;
+
 export class GameOfLife {
   readonly cols: number;
   readonly rows: number;
@@ -12,6 +14,15 @@ export class GameOfLife {
   private _generation = 0;
 
   constructor(cols: number, rows: number) {
+    if (!Number.isInteger(cols) || cols <= 0)
+      throw new RangeError('cols must be a positive integer');
+    if (!Number.isInteger(rows) || rows <= 0)
+      throw new RangeError('rows must be a positive integer');
+    if (cols > MAX_DIMENSION)
+      throw new RangeError(`cols ${cols} exceeds maximum dimension ${MAX_DIMENSION}`);
+    if (rows > MAX_DIMENSION)
+      throw new RangeError(`rows ${rows} exceeds maximum dimension ${MAX_DIMENSION}`);
+
     this.cols = cols;
     this.rows = rows;
     this.current = new Uint8Array(cols * rows);
@@ -72,6 +83,8 @@ export class GameOfLife {
   }
 
   randomize(density = 0.3): void {
+    if (!Number.isFinite(density) || density < 0 || density > 1)
+      throw new RangeError('density must be a finite number in [0, 1]');
     for (let i = 0; i < this.current.length; i++) {
       this.current[i] = Math.random() < density ? 1 : 0;
     }

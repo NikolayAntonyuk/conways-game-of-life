@@ -5,6 +5,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Conway's Game of Life — Neon Cyberpunk</title>
+  <!-- Suppress browser favicon request (prevents 404 console error) -->
+  <link rel="icon" href="data:,">
   <style>
     *,
     *::before,
@@ -61,6 +63,9 @@
       box-shadow: 0 0 18px rgba(0, 255, 136, .45), 0 0 50px rgba(0, 255, 136, .15);
       cursor: crosshair;
     }
+
+    /* Author-sheet display:block overrides UA [hidden]{display:none} — restore it */
+    canvas[hidden] { display: none; }
 
     /* WCAG 2.4.7 — visible focus indicator for canvas (keyboard users) */
     canvas:focus-visible {

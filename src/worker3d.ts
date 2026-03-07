@@ -23,7 +23,7 @@ self.addEventListener('message', (e: MessageEvent<InMsg>) => {
       break;
     }
     case 'step': {
-      game.step();
+      game.step(false);
       reply('sync');
       break;
     }

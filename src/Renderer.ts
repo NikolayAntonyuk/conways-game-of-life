@@ -1,11 +1,12 @@
 import type { CellChange } from './GameOfLife.ts';
 
-const CELL_SIZE = 12;
+const CELL_SIZE  = 12;
 const CELL_INNER = 10;          // drawn size (1 px gap on each side)
 const ALIVE_COLOR = '#00ff88';
 const BG_COLOR = '#0a0a0f';
 const FLASH_VALUE = 1.8;        // birth flash start (>1 = extra bright)
-const FADE_SPEED = 0.06;       // per animation frame (~60 fps → ~17 frames fade)
+const FADE_SPEED = 0.06;        // per animation frame (~60 fps → ~17 frames fade)
+const SPRITE_PAD = 10;          // extra px on each side to capture the glow shadow
 
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D;
@@ -17,17 +18,39 @@ export class Renderer {
   /** Cells currently in a visual transition (flash or fade) */
   private readonly activeSet = new Set<number>();
 
+  /**
+   * Pre-rendered cell+glow sprite (null when OffscreenCanvas is unavailable,
+   * e.g. in the jsdom test environment — a live fallback is used instead).
+   */
+  private readonly aliveSprite: OffscreenCanvas | null;
+
   constructor(canvas: HTMLCanvasElement, cols: number, rows: number) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Cannot acquire 2D context');
     this.ctx = ctx;
     this.cols = cols;
     this.visualState = new Float32Array(cols * rows);
+    this.aliveSprite = this.buildAliveSprite();
+  }
+
+  /** Build a (CELL_INNER + 2·SPRITE_PAD)² OffscreenCanvas with glow pre-baked. */
+  private buildAliveSprite(): OffscreenCanvas | null {
+    if (typeof OffscreenCanvas === 'undefined') return null;
+    const size = CELL_INNER + 2 * SPRITE_PAD;
+    const sprite = new OffscreenCanvas(size, size);
+    const ctx = sprite.getContext('2d')!;
+    ctx.shadowBlur  = 10;
+    ctx.shadowColor = ALIVE_COLOR;
+    ctx.fillStyle   = ALIVE_COLOR;
+    ctx.fillRect(SPRITE_PAD, SPRITE_PAD, CELL_INNER, CELL_INNER);
+    return sprite;
   }
 
   /** Call after every game.step() to register born/died cells. */
   applyChanges(changes: CellChange[]): void {
+    const total = this.visualState.length;
     for (const { index, alive } of changes) {
+      if (index < 0 || index >= total) throw new RangeError(`Cell index ${index} out of bounds [0, ${total})`);
       if (alive) {
         this.visualState[index] = FLASH_VALUE;
       }
@@ -38,6 +61,9 @@ export class Renderer {
 
   /** Reset visual state to match buffer (after randomize / clear). */
   syncVisualState(buffer: Uint8Array): void {
+    if (buffer.length !== this.visualState.length) {
+      throw new RangeError(`Buffer length ${buffer.length} does not match grid size ${this.visualState.length}`);
+    }
     for (let i = 0; i < buffer.length; i++) {
       this.visualState[i] = buffer[i] === 1 ? 1.0 : 0.0;
     }
@@ -46,11 +72,17 @@ export class Renderer {
 
   /** Set a single cell's visual state (used when drawing interactively). */
   setVisualState(index: number, value: number): void {
+    if (index < 0 || index >= this.visualState.length) {
+      throw new RangeError(`Cell index ${index} out of bounds [0, ${this.visualState.length})`);
+    }
     this.visualState[index] = value;
   }
 
   /** Render one frame. Call every requestAnimationFrame tick. */
   render(buffer: Uint8Array): void {
+    if (buffer.length !== this.visualState.length) {
+      throw new RangeError(`Buffer length ${buffer.length} does not match grid size ${this.visualState.length}`);
+    }
     const { ctx, cols, visualState, activeSet } = this;
 
     // ── 1. Clear canvas ─────────────────────────────────────────────────────
@@ -75,19 +107,31 @@ export class Renderer {
     }
     for (const i of toRemove) activeSet.delete(i);
 
-    // ── 3. Batch-draw normal alive cells (uniform style, cheap) ─────────────
-    ctx.save();
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = ALIVE_COLOR;
-    ctx.fillStyle = ALIVE_COLOR;
-    for (let i = 0; i < buffer.length; i++) {
-      if (buffer[i] === 1 && !activeSet.has(i)) {
-        const x = i % cols;
-        const y = (i - x) / cols;
-        ctx.fillRect(x * CELL_SIZE + 1, y * CELL_SIZE + 1, CELL_INNER, CELL_INNER);
+    // ── 3. Batch-draw normal alive cells ─────────────────────────────────────
+    // Fast path: stamp the pre-baked sprite (pixel copy, no per-call GPU blur).
+    // Fallback: original save/shadowBlur/restore when OffscreenCanvas is absent.
+    if (this.aliveSprite) {
+      for (let i = 0; i < buffer.length; i++) {
+        if (buffer[i] === 1 && !activeSet.has(i)) {
+          const x = i % cols;
+          const y = (i - x) / cols;
+          ctx.drawImage(this.aliveSprite, x * CELL_SIZE + 1 - SPRITE_PAD, y * CELL_SIZE + 1 - SPRITE_PAD);
+        }
       }
+    } else {
+      ctx.save();
+      ctx.shadowBlur  = 10;
+      ctx.shadowColor = ALIVE_COLOR;
+      ctx.fillStyle   = ALIVE_COLOR;
+      for (let i = 0; i < buffer.length; i++) {
+        if (buffer[i] === 1 && !activeSet.has(i)) {
+          const x = i % cols;
+          const y = (i - x) / cols;
+          ctx.fillRect(x * CELL_SIZE + 1, y * CELL_SIZE + 1, CELL_INNER, CELL_INNER);
+        }
+      }
+      ctx.restore();
     }
-    ctx.restore();
 
     // ── 4. Draw birth-flash cells (individually, brighter glow) ─────────────
     for (const idx of activeSet) {
@@ -101,9 +145,9 @@ export class Renderer {
       const y = (idx - x) / cols;
 
       ctx.save();
-      ctx.shadowBlur = 20 + 10 * t;
+      ctx.shadowBlur  = 20 + 10 * t;
       ctx.shadowColor = `rgb(${r},${g},${b})`;
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillStyle   = `rgb(${r},${g},${b})`;
       ctx.fillRect(x * CELL_SIZE + 1, y * CELL_SIZE + 1, CELL_INNER, CELL_INNER);
       ctx.restore();
     }
@@ -118,9 +162,9 @@ export class Renderer {
 
       ctx.save();
       ctx.globalAlpha = alpha;
-      ctx.shadowBlur = Math.round(8 * alpha);
+      ctx.shadowBlur  = Math.round(8 * alpha);
       ctx.shadowColor = ALIVE_COLOR;
-      ctx.fillStyle = ALIVE_COLOR;
+      ctx.fillStyle   = ALIVE_COLOR;
       ctx.fillRect(x * CELL_SIZE + 1, y * CELL_SIZE + 1, CELL_INNER, CELL_INNER);
       ctx.restore();
     }

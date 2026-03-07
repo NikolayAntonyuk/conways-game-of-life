@@ -224,7 +224,7 @@ function gameLoop(timestamp: number): void {
           const changes = game.step();
           renderer.applyChanges(changes);
         }
-        lastStepTime = timestamp;
+        lastStepTime += stepsToRun * (1000 / speed);
         updateGenCounter();
       }
     }
@@ -354,6 +354,7 @@ function paintCell(cx: number, cy: number): void {
 
 canvas.addEventListener('mousedown', (e: MouseEvent) => {
   e.preventDefault();
+  canvas.focus(); // e.preventDefault() suppresses default focus — restore it manually
   isDrawing = true;
   drawMode  = e.button !== 2;
   const { cx, cy } = getCellCoords(e);

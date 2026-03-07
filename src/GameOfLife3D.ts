@@ -71,7 +71,7 @@ export class GameOfLife3D {
     this.current[z * this.cols * this.rows + y * this.cols + x] = alive ? 1 : 0;
   }
 
-  step(): CellChange3D[] {
+  step(collectChanges = true): CellChange3D[] {
     const changes: CellChange3D[] = [];
     const { cols, rows, layers, bornSet, surviveSet } = this;
     const slice = cols * rows;
@@ -85,7 +85,7 @@ export class GameOfLife3D {
           const nextAlive = alive ? surviveSet[n] === 1 : bornSet[n] === 1;
 
           this.next[i] = nextAlive ? 1 : 0;
-          if (alive !== nextAlive) changes.push({ index: i, alive: nextAlive });
+          if (collectChanges && alive !== nextAlive) changes.push({ index: i, alive: nextAlive });
         }
       }
     }
