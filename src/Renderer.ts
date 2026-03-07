@@ -6,7 +6,6 @@ const ALIVE_COLOR = '#00ff88';
 const BG_COLOR = '#0a0a0f';
 const FLASH_VALUE = 1.8;        // birth flash start (>1 = extra bright)
 const FADE_SPEED = 0.06;        // per animation frame (~60 fps → ~17 frames fade)
-const SPRITE_PAD = 10;          // extra px on each side to capture the glow shadow
 
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D;
@@ -15,47 +14,49 @@ export class Renderer {
   /** 0 = dead · (0–1] = alive/fading · (1–2] = birth flash */
   private readonly visualState: Float32Array;
 
-  /** Cells currently in a visual transition (flash or fade) */
-  private readonly activeSet = new Set<number>();
+  /**
+   * 1 = cell is in an active visual transition (flash or fade), 0 = stable.
+   * Uint8Array gives O(1) lookup with a direct index — no hash, no Set overhead.
+   */
+  private readonly activeFlags: Uint8Array;
 
   /**
-   * Pre-rendered cell+glow sprite (null when OffscreenCanvas is unavailable,
-   * e.g. in the jsdom test environment — a live fallback is used instead).
+   * Pre-allocated list of active cell indices.
+   * Compacted in-place each render frame — zero heap allocation per frame.
    */
-  private readonly aliveSprite: OffscreenCanvas | null;
+  private readonly activeList: Int32Array;
+
+  /** Number of valid entries currently in activeList. */
+  private activeCount = 0;
 
   constructor(canvas: HTMLCanvasElement, cols: number, rows: number) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Cannot acquire 2D context');
     this.ctx = ctx;
     this.cols = cols;
-    this.visualState = new Float32Array(cols * rows);
-    this.aliveSprite = this.buildAliveSprite();
+    const total = cols * rows;
+    this.visualState = new Float32Array(total);
+    this.activeFlags  = new Uint8Array(total);
+    this.activeList   = new Int32Array(total);
   }
 
-  /** Build a (CELL_INNER + 2·SPRITE_PAD)² OffscreenCanvas with glow pre-baked. */
-  private buildAliveSprite(): OffscreenCanvas | null {
-    if (typeof OffscreenCanvas === 'undefined') return null;
-    const size = CELL_INNER + 2 * SPRITE_PAD;
-    const sprite = new OffscreenCanvas(size, size);
-    const ctx = sprite.getContext('2d')!;
-    ctx.shadowBlur  = 10;
-    ctx.shadowColor = ALIVE_COLOR;
-    ctx.fillStyle   = ALIVE_COLOR;
-    ctx.fillRect(SPRITE_PAD, SPRITE_PAD, CELL_INNER, CELL_INNER);
-    return sprite;
+  /** True while flash / fade transitions are still running. */
+  get hasPendingTransitions(): boolean {
+    return this.activeCount > 0;
   }
 
   /** Call after every game.step() to register born/died cells. */
   applyChanges(changes: CellChange[]): void {
     const total = this.visualState.length;
     for (const { index, alive } of changes) {
-      if (index < 0 || index >= total) throw new RangeError(`Cell index ${index} out of bounds [0, ${total})`);
-      if (alive) {
-        this.visualState[index] = FLASH_VALUE;
+      if (index < 0 || index >= total)
+        throw new RangeError(`Cell index ${index} out of bounds [0, ${total})`);
+      if (alive) this.visualState[index] = FLASH_VALUE;
+      // Dead cells keep their current visualState and start fading in render().
+      if (this.activeFlags[index] === 0) {
+        this.activeFlags[index] = 1;
+        this.activeList[this.activeCount++] = index;
       }
-      // dying cells keep their current visualState and start fading in render()
-      this.activeSet.add(index);
     }
   }
 
@@ -67,7 +68,8 @@ export class Renderer {
     for (let i = 0; i < buffer.length; i++) {
       this.visualState[i] = buffer[i] === 1 ? 1.0 : 0.0;
     }
-    this.activeSet.clear();
+    this.activeFlags.fill(0);
+    this.activeCount = 0;
   }
 
   /** Set a single cell's visual state (used when drawing interactively). */
@@ -83,58 +85,57 @@ export class Renderer {
     if (buffer.length !== this.visualState.length) {
       throw new RangeError(`Buffer length ${buffer.length} does not match grid size ${this.visualState.length}`);
     }
-    const { ctx, cols, visualState, activeSet } = this;
+    const { ctx, cols, visualState, activeFlags, activeList } = this;
 
     // ── 1. Clear canvas ─────────────────────────────────────────────────────
     ctx.fillStyle = BG_COLOR;
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-    // ── 2. Advance visual transitions ────────────────────────────────────────
-    const toRemove: number[] = [];
-    for (const idx of activeSet) {
+    // ── 2. Advance transitions — in-place compaction, zero allocation ────────
+    let count = this.activeCount;
+    let newCount = 0;
+    for (let j = 0; j < count; j++) {
+      const idx = activeList[j];
       const alive = buffer[idx] === 1;
+      let keep: boolean;
       if (alive) {
         if (visualState[idx] > 1.0) {
           visualState[idx] = Math.max(1.0, visualState[idx] - FADE_SPEED);
-          if (visualState[idx] <= 1.0) toRemove.push(idx);
-        } else {
-          toRemove.push(idx);
         }
+        keep = visualState[idx] > 1.0;
       } else {
         visualState[idx] = Math.max(0, visualState[idx] - FADE_SPEED);
-        if (visualState[idx] <= 0) toRemove.push(idx);
+        keep = visualState[idx] > 0;
+      }
+      if (keep) {
+        activeList[newCount++] = idx;
+      } else {
+        activeFlags[idx] = 0;
       }
     }
-    for (const i of toRemove) activeSet.delete(i);
+    this.activeCount = count = newCount;
 
-    // ── 3. Batch-draw normal alive cells ─────────────────────────────────────
-    // Fast path: stamp the pre-baked sprite (pixel copy, no per-call GPU blur).
-    // Fallback: original save/shadowBlur/restore when OffscreenCanvas is absent.
-    if (this.aliveSprite) {
-      for (let i = 0; i < buffer.length; i++) {
-        if (buffer[i] === 1 && !activeSet.has(i)) {
-          const x = i % cols;
-          const y = (i - x) / cols;
-          ctx.drawImage(this.aliveSprite, x * CELL_SIZE + 1 - SPRITE_PAD, y * CELL_SIZE + 1 - SPRITE_PAD);
-        }
+    // ── 3. Batch-draw all stable alive cells — single Path2D fill ────────────
+    // One path.rect() per alive cell; one ctx.fill(path) = one GPU draw call.
+    // shadowBlur is paid once for the entire path, not once per cell.
+    const path = new Path2D();
+    for (let i = 0; i < buffer.length; i++) {
+      if (buffer[i] === 1 && activeFlags[i] === 0) {
+        const x = i % cols;
+        const y = (i - x) / cols;
+        path.rect(x * CELL_SIZE + 1, y * CELL_SIZE + 1, CELL_INNER, CELL_INNER);
       }
-    } else {
-      ctx.save();
-      ctx.shadowBlur  = 10;
-      ctx.shadowColor = ALIVE_COLOR;
-      ctx.fillStyle   = ALIVE_COLOR;
-      for (let i = 0; i < buffer.length; i++) {
-        if (buffer[i] === 1 && !activeSet.has(i)) {
-          const x = i % cols;
-          const y = (i - x) / cols;
-          ctx.fillRect(x * CELL_SIZE + 1, y * CELL_SIZE + 1, CELL_INNER, CELL_INNER);
-        }
-      }
-      ctx.restore();
     }
+    ctx.save();
+    ctx.shadowBlur  = 10;
+    ctx.shadowColor = ALIVE_COLOR;
+    ctx.fillStyle   = ALIVE_COLOR;
+    ctx.fill(path);
+    ctx.restore();
 
     // ── 4. Draw birth-flash cells (individually, brighter glow) ─────────────
-    for (const idx of activeSet) {
+    for (let j = 0; j < count; j++) {
+      const idx = activeList[j];
       if (buffer[idx] !== 1) continue;
       const flash = visualState[idx] - 1.0;          // 0–0.8 range
       const t = Math.min(1, flash / 0.8);            // normalise to 0–1
@@ -153,7 +154,8 @@ export class Renderer {
     }
 
     // ── 5. Draw dying/fading cells ───────────────────────────────────────────
-    for (const idx of activeSet) {
+    for (let j = 0; j < count; j++) {
+      const idx = activeList[j];
       if (buffer[idx] !== 0) continue;
       const alpha = visualState[idx];
       if (alpha <= 0) continue;

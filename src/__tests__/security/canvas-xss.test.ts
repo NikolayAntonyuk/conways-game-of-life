@@ -20,6 +20,7 @@ function buildRenderer(): { renderer: Renderer; canvas: HTMLCanvasElement } {
     globalAlpha: 1,
     get canvas() { return canvas },
     fillRect: vi.fn(),
+    fill: vi.fn(),
     save: vi.fn(),
     restore: vi.fn(),
   }

@@ -58,6 +58,7 @@ let speed        = 10;   // steps per second
 let lastStepTime = 0;
 let isDrawing    = false;
 let drawMode     = true; // true = paint, false = erase
+let dirty        = true; // true = canvas needs a repaint
 
 // ── Hall of Fame session tracking ────────────────────────────────────────────
 // Captured on the first step of each run so it reflects manual draws too.
@@ -114,6 +115,7 @@ function doRandomize(): void {
   game.randomize();
   sessionStartCaptured = false;
   renderer.syncVisualState(game.getBuffer());
+  dirty = true;
   updateGenCounter();
   announce(newRecord ? 'New high score! Board randomized' : 'Board randomized');
 }
@@ -127,6 +129,7 @@ function doClear(): void {
   game.clear();
   sessionStartCaptured = false;
   renderer.syncVisualState(game.getBuffer());
+  dirty = true;
   updateGenCounter();
   announce(newRecord ? 'New high score! Board cleared' : 'Board cleared');
 }
@@ -204,6 +207,7 @@ function enterMode2D(): void {
   mode3dBtn.textContent = '3D MODE';
   mode3dBtn.setAttribute('aria-label', 'Switch to 3D mode');
 
+  dirty = true; // ensure first 2D frame is always drawn
   updateGenCounter();
   announce('2D mode activated');
 }
@@ -226,9 +230,14 @@ function gameLoop(timestamp: number): void {
         }
         lastStepTime += stepsToRun * (1000 / speed);
         updateGenCounter();
+        dirty = true;
       }
     }
-    renderer.render(game.getBuffer());
+    // Skip render when paused, stable, and nothing has changed.
+    if (dirty || renderer.hasPendingTransitions) {
+      renderer.render(game.getBuffer());
+      dirty = false;
+    }
   } else {
     // ── 3D path ──────────────────────────────────────────────────────────────
     if (running3d && !stepPending && workerReady) {
@@ -259,16 +268,19 @@ gliderBtn.addEventListener('click', () => {
   const cx = Math.floor(COLS / 2) - 1;
   const cy = Math.floor(ROWS / 2) - 1;
   game.placeGlider(cx, cy);
+  dirty = true;
   announce('Glider pattern placed at centre');
 });
 
 pulsarBtn.addEventListener('click', () => {
   game.placePulsar(Math.floor(COLS / 2) - 6, Math.floor(ROWS / 2) - 6);
+  dirty = true;
   announce('Pulsar pattern placed at centre');
 });
 
 gosperBtn.addEventListener('click', () => {
   game.placeGosperGliderGun(2, Math.floor(ROWS / 2) - 4);
+  dirty = true;
   announce('Gosper Glider Gun placed');
 });
 
@@ -299,6 +311,7 @@ hofLoadBtn.addEventListener('click', () => {
   sessionStartGrid     = game.getBuffer().slice();
   sessionStartCaptured = true;
   renderer.syncVisualState(game.getBuffer());
+  dirty = true;
   updateGenCounter();
   closeHof();
   announce('Hall of Fame starting grid loaded');
@@ -350,6 +363,7 @@ function paintCell(cx: number, cy: number): void {
   if (cx < 0 || cx >= COLS || cy < 0 || cy >= ROWS) return;
   game.setCell(cx, cy, drawMode);
   renderer.setVisualState(cy * COLS + cx, drawMode ? 1.0 : 0.0);
+  dirty = true;
 }
 
 canvas.addEventListener('mousedown', (e: MouseEvent) => {
