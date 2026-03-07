@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Conway's Game of Life — Neon Cyberpunk</title>
+  <style>
+    *,
+    *::before,
+    *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    /* ── Visually hidden but accessible to screen readers ─────────────────── */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    body {
+      background: #0a0a0f;
+      color: #00ff88;
+      font-family: 'Courier New', Courier, monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    main {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: 1.3rem;
+      letter-spacing: 10px;
+      text-shadow: 0 0 10px #00ff88, 0 0 28px rgba(0, 255, 136, .55);
+      margin-bottom: 14px;
+    }
+
+    canvas {
+      display: block;
+      border: 1px solid #00ff88;
+      box-shadow: 0 0 18px rgba(0, 255, 136, .45), 0 0 50px rgba(0, 255, 136, .15);
+      cursor: crosshair;
+    }
+
+    /* WCAG 2.4.7 — visible focus indicator for canvas (keyboard users) */
+    canvas:focus-visible {
+      outline: 3px solid #00ff88;
+      outline-offset: 3px;
+    }
+
+    #controls {
+      margin-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .sep {
+      width: 1px;
+      height: 22px;
+      background: rgba(0, 255, 136, .35);
+    }
+
+    button {
+      background: transparent;
+      border: 1px solid rgba(0, 255, 136, .55);
+      color: #00ff88;
+      font-family: inherit;
+      font-size: 0.68rem;
+      letter-spacing: 2px;
+      padding: 6px 14px;
+      cursor: pointer;
+      transition: background .15s, box-shadow .15s;
+      text-shadow: 0 0 6px rgba(0, 255, 136, .7);
+    }
+
+    button:hover {
+      background: rgba(0, 255, 136, .08);
+      box-shadow: 0 0 12px rgba(0, 255, 136, .45);
+    }
+
+    /* WCAG 2.4.7 — visible focus indicator for buttons */
+    button:focus-visible {
+      outline: 2px solid #00ff88;
+      outline-offset: 3px;
+      box-shadow: 0 0 0 4px rgba(0, 255, 136, .25);
+    }
+
+    button.active {
+      background: rgba(0, 255, 136, .14);
+      border-color: #00ff88;
+      box-shadow: 0 0 18px rgba(0, 255, 136, .65);
+    }
+
+    .gen-wrap {
+      font-size: 0.72rem;
+      letter-spacing: 3px;
+      text-shadow: 0 0 8px rgba(0, 255, 136, .7);
+      min-width: 120px;
+    }
+
+    .speed-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.68rem;
+      letter-spacing: 2px;
+    }
+
+    /* <label> inherits body font; match the visual style of the old <span> */
+    .speed-wrap label {
+      font-family: inherit;
+      font-size: inherit;
+      letter-spacing: inherit;
+      color: inherit;
+      cursor: default;
+    }
+
+    .speed-val {
+      min-width: 22px;
+      text-align: right;
+    }
+
+    input[type=range] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100px;
+      height: 3px;
+      background: rgba(0, 255, 136, .25);
+      /* outline removed here; handled via :focus-visible below */
+      border: none;
+      cursor: pointer;
+    }
+
+    /* WCAG 2.4.7 — visible focus indicator for range slider */
+    input[type=range]:focus-visible {
+      outline: 2px solid #00ff88;
+      outline-offset: 4px;
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #00ff88;
+      cursor: pointer;
+      box-shadow: 0 0 6px #00ff88;
+    }
+
+    input[type=range]::-moz-range-thumb {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #00ff88;
+      cursor: pointer;
+      box-shadow: 0 0 6px #00ff88;
+      border: none;
+    }
+
+    /* WCAG 1.4.3 — contrast fix: 0.38 opacity (~2.83:1) → 0.65 opacity (~5.6:1) */
+    .hint {
+      font-size: 0.58rem;
+      letter-spacing: 1px;
+      color: rgba(0, 255, 136, .65);
+    }
+
+    /* ── 3D rules row ────────────────────────────────────────────────────────── */
+    .rules3d-wrap {
+      font-size: 0.68rem;
+      letter-spacing: 2px;
+    }
+
+    .rules3d-label {
+      color: rgba(0, 255, 136, .65);
+    }
+
+    select {
+      background: transparent;
+      border: 1px solid rgba(0, 255, 136, .55);
+      color: #00ff88;
+      font-family: inherit;
+      font-size: 0.68rem;
+      letter-spacing: 1px;
+      padding: 5px 10px;
+      cursor: pointer;
+      outline: none;
+    }
+
+    select:focus-visible {
+      outline: 2px solid #00ff88;
+      outline-offset: 3px;
+    }
+
+    select option {
+      background: #0a0a0f;
+      color: #00ff88;
+    }
+
+    /* ── Hall of Fame modal ──────────────────────────────────────────────────── */
+    .hof-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 10, 15, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .hof-modal[hidden] {
+      display: none;
+    }
+
+    .hof-content {
+      border: 1px solid #00ff88;
+      background: #0a0a0f;
+      padding: 28px 36px;
+      min-width: 280px;
+      text-align: center;
+      box-shadow: 0 0 40px rgba(0, 255, 136, .3), 0 0 80px rgba(0, 255, 136, .1);
+    }
+
+    .hof-content h2 {
+      font-family: inherit;
+      font-size: 1rem;
+      letter-spacing: 8px;
+      text-shadow: 0 0 10px #00ff88, 0 0 28px rgba(0, 255, 136, .55);
+      margin-bottom: 18px;
+    }
+
+    .hof-row {
+      font-size: 0.72rem;
+      letter-spacing: 3px;
+      margin: 6px 0;
+      text-shadow: 0 0 8px rgba(0, 255, 136, .7);
+    }
+
+    .hof-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+
+    .hof-empty {
+      font-size: 0.62rem;
+      letter-spacing: 1px;
+      color: rgba(0, 255, 136, .5);
+      margin-top: 14px;
+    }
+  </style>
+</head>
+
+<body>
+  <main aria-label="Conway's Game of Life">
+
+    <h1>CONWAY'S GAME OF LIFE</h1>
+
+    <!-- Visually hidden description read by screen readers when canvas is focused -->
+    <p id="canvas-desc" class="sr-only">
+      Interactive cellular automaton board, 66 columns by 50 rows.
+      Use the controls below or keyboard shortcuts to start, pause, clear, or randomize the simulation.
+      Left-click or drag to draw cells; right-click to erase.
+    </p>
+
+    <!-- Game board ─────────────────────────────────────────────────────────── -->
+    <canvas
+      id="gameCanvas"
+      width="800"
+      height="600"
+      role="img"
+      aria-label="Game board — simulation is paused"
+      aria-describedby="canvas-desc"
+      tabindex="0"
+    ></canvas>
+
+    <!-- 3D canvas (hidden until 3D mode activated) -->
+    <canvas
+      id="canvas3d"
+      width="800"
+      height="600"
+      aria-label="3D game board — drag to orbit, scroll to zoom"
+      tabindex="0"
+      hidden
+    ></canvas>
+
+    <!-- aria-live region: screen reader announcements for game state changes -->
+    <div
+      id="a11y-announce"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      class="sr-only"
+    ></div>
+
+    <!-- Controls ────────────────────────────────────────────────────────────── -->
+    <div id="controls" role="region" aria-label="Game controls">
+
+      <div class="row" role="group" aria-label="Playback and speed">
+        <!--
+          aria-pressed marks this as a toggle button.
+          Value is kept in sync with running state in main.ts.
+        -->
+        <button id="playPauseBtn" aria-pressed="false">&#9654; PLAY</button>
+        <button id="randomizeBtn">RANDOMIZE</button>
+        <button id="clearBtn">CLEAR</button>
+
+        <div class="sep" role="none" aria-hidden="true"></div>
+
+        <div class="speed-wrap">
+          <!-- <label> programmatically associates the text with the slider (WCAG 1.3.1) -->
+          <label for="speedSlider">SPEED</label>
+          <input type="range" id="speedSlider" min="1" max="200" value="10" />
+          <!-- aria-hidden: the slider already exposes its value to SR natively -->
+          <span class="speed-val" id="speedVal" aria-hidden="true">10</span>
+        </div>
+
+        <div class="sep" role="none" aria-hidden="true"></div>
+
+        <div class="gen-wrap">
+          <!-- sr-only provides semantic label; aria-hidden hides visual "GEN" abbreviation -->
+          <span class="sr-only">Generation: </span>
+          <span aria-hidden="true">GEN </span>
+          <span id="genCounter">000000</span>
+        </div>
+      </div>
+
+      <div class="row" role="group" aria-label="Pattern presets">
+        <button id="gliderBtn"  aria-label="Place Glider pattern at centre">GLIDER</button>
+        <button id="pulsarBtn"  aria-label="Place Pulsar pattern at centre">PULSAR</button>
+        <button id="gosperBtn"  aria-label="Place Gosper Glider Gun pattern">GOSPER GUN</button>
+
+        <div class="sep" role="none" aria-hidden="true"></div>
+
+        <button id="mode3dBtn" aria-label="Switch to 3D mode">3D MODE</button>
+
+        <div class="sep" role="none" aria-hidden="true"></div>
+
+        <button id="hofBtn" aria-label="Open Hall of Fame">HALL OF FAME</button>
+
+        <div class="sep" role="none" aria-hidden="true"></div>
+
+        <!--
+          aria-label spells out abbreviations (LMB/RMB) for screen readers.
+          Visual text is unchanged.
+        -->
+        <span
+          class="hint"
+          aria-label="Keyboard shortcuts: left-click to draw, right-click to erase, Space to play or pause, R to randomize, C to clear"
+        >LMB DRAW &nbsp;|&nbsp; RMB ERASE &nbsp;|&nbsp; SPACE PLAY/PAUSE &nbsp;|&nbsp; R RANDOM
+          &nbsp;|&nbsp; C CLEAR</span>
+      </div>
+
+      <!-- 3D rules row — hidden until 3D mode is active -->
+      <div id="rules3dWrap" class="row rules3d-wrap" hidden>
+        <span class="rules3d-label">3D RULES</span>
+        <select id="rules3dSelect" aria-label="3D cellular automaton rule set">
+          <option value="B6/S567">B6/S567 — Carter Bays</option>
+          <option value="B5/S45">B5/S45 — Bays Variant</option>
+          <option value="B5/S56">B5/S56 — Conservative</option>
+          <option value="B4/S35">B4/S35 — Explosive</option>
+          <option value="B6/S56">B6/S56 — Moderate</option>
+        </select>
+      </div>
+
+    </div><!-- /#controls -->
+
+    <!-- Hall of Fame modal ──────────────────────────────────────────────────── -->
+    <div
+      id="hofModal"
+      class="hof-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="hofTitle"
+      hidden
+    >
+      <div class="hof-content">
+        <h2 id="hofTitle">HALL OF FAME</h2>
+        <p class="hof-row">HIGH SCORE: <span id="hofScore">------</span></p>
+        <p class="hof-row">ACHIEVED: <span id="hofDate">------</span></p>
+        <p id="hofEmpty" class="hof-empty">No records yet. Start playing!</p>
+        <div class="hof-actions">
+          <button id="hofLoadBtn" aria-label="Load Hall of Fame starting grid onto the board" hidden>LOAD GRID</button>
+          <button id="hofCloseBtn">CLOSE</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>
