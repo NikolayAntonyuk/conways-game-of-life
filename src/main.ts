@@ -2,7 +2,7 @@ import { GameOfLife } from './GameOfLife.ts';
 import { Renderer } from './Renderer.ts';
 import { tryUpdateHighScore, loadRecord } from './StorageEngine.ts';
 import { Renderer3D } from './Renderer3D.ts';
-import type { Rules3D } from './GameOfLife3D.ts';
+import type { CellChange3D, Rules3D } from './GameOfLife3D.ts';
 import Worker3DClass from './worker3d.ts?worker';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -160,15 +160,23 @@ function closeHof(): void {
 
 // ── 3D mode ───────────────────────────────────────────────────────────────────
 function onWorkerMessage(e: MessageEvent): void {
-  const { type, generation, buffer } = e.data as { type: string; generation: number; buffer: ArrayBuffer };
-  if (type !== 'ready' && type !== 'sync') return;
+  const msg = e.data as { type: string; generation: number; buffer: ArrayBuffer; changes?: CellChange3D[] };
+  if (msg.type !== 'ready' && msg.type !== 'sync') return;
 
-  buffer3d     = new Uint8Array(buffer);
-  generation3d = generation;
-  renderer3d!.syncFromBuffer(buffer3d);
+  buffer3d     = new Uint8Array(msg.buffer);
+  generation3d = msg.generation;
+
+  // Step replies include a changes diff — use O(changedCells) differential update.
+  // Init/randomize/clear replies have no changes — full rebuild.
+  if (msg.type === 'sync' && msg.changes !== undefined) {
+    renderer3d!.applyChanges(msg.changes);
+  } else {
+    renderer3d!.syncFromBuffer(buffer3d);
+  }
+
   updateGenCounter();
   stepPending = false;
-  if (type === 'ready') {
+  if (msg.type === 'ready') {
     workerReady = true;
     announce('3D engine ready');
   }

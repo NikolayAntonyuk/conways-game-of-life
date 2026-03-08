@@ -28,6 +28,9 @@ export class GameOfLife3D {
   private bornSet:    Uint8Array;
   private surviveSet: Uint8Array;
 
+  // 26 precomputed flat neighbour offsets for interior-cell fast path
+  private readonly neighborOffsets: Int32Array;
+
   constructor(cols: number, rows: number, layers: number, rules: Rules3D = DEFAULT_RULES_3D) {
     if (!Number.isInteger(cols)   || cols   <= 0) throw new RangeError('cols must be a positive integer');
     if (!Number.isInteger(rows)   || rows   <= 0) throw new RangeError('rows must be a positive integer');
@@ -46,6 +49,19 @@ export class GameOfLife3D {
     this.bornSet    = new Uint8Array(27);
     this.surviveSet = new Uint8Array(27);
     this.applyRules(rules);
+
+    // Precompute 26 flat offsets for interior-cell neighbour lookup (no modulo)
+    const slice = cols * rows;
+    const off: number[] = [];
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0 && dz === 0) continue;
+          off.push(dz * slice + dy * cols + dx);
+        }
+      }
+    }
+    this.neighborOffsets = new Int32Array(off);
   }
 
   get generation(): number { return this._generation; }
@@ -73,17 +89,29 @@ export class GameOfLife3D {
 
   step(collectChanges = true): CellChange3D[] {
     const changes: CellChange3D[] = [];
-    const { cols, rows, layers, bornSet, surviveSet } = this;
+    const { cols, rows, layers, bornSet, surviveSet, neighborOffsets } = this;
     const slice = cols * rows;
+    const cur   = this.current;
+    const colsM1   = cols   - 1;
+    const rowsM1   = rows   - 1;
+    const layersM1 = layers - 1;
 
     for (let z = 0; z < layers; z++) {
       for (let y = 0; y < rows; y++) {
         for (let x = 0; x < cols; x++) {
           const i = z * slice + y * cols + x;
-          const alive = this.current[i] === 1;
-          const n     = this.countNeighbors(x, y, z);
-          const nextAlive = alive ? surviveSet[n] === 1 : bornSet[n] === 1;
+          const alive = cur[i] === 1;
 
+          let n: number;
+          if (x > 0 && x < colsM1 && y > 0 && y < rowsM1 && z > 0 && z < layersM1) {
+            // Interior fast path: ~85 % of cells — no modulo, direct flat-offset arithmetic
+            n = 0;
+            for (let o = 0; o < 26; o++) n += cur[i + neighborOffsets[o]];
+          } else {
+            n = this.countNeighbors(x, y, z);
+          }
+
+          const nextAlive = alive ? surviveSet[n] === 1 : bornSet[n] === 1;
           this.next[i] = nextAlive ? 1 : 0;
           if (collectChanges && alive !== nextAlive) changes.push({ index: i, alive: nextAlive });
         }

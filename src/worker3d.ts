@@ -1,5 +1,5 @@
 import { GameOfLife3D, DEFAULT_RULES_3D } from './GameOfLife3D.ts';
-import type { Rules3D } from './GameOfLife3D.ts';
+import type { CellChange3D, Rules3D } from './GameOfLife3D.ts';
 
 // ── Inbound message types ─────────────────────────────────────────────────────
 interface InitMsg     { type: 'init';     cols: number; rows: number; layers: number; rules: Rules3D }
@@ -23,8 +23,8 @@ self.addEventListener('message', (e: MessageEvent<InMsg>) => {
       break;
     }
     case 'step': {
-      game.step(false);
-      reply('sync');
+      const changes = game.step(true);
+      reply('sync', changes);
       break;
     }
     case 'randomize': {
@@ -45,9 +45,9 @@ self.addEventListener('message', (e: MessageEvent<InMsg>) => {
 });
 
 // ── Helper: copy buffer and post it back (zero-copy via transfer) ─────────────
-function reply(type: 'ready' | 'sync'): void {
+function reply(type: 'ready' | 'sync', changes?: CellChange3D[]): void {
   const buffer = game.getBuffer().slice();
   // Cast to the minimal interface shared by DedicatedWorkerGlobalScope.postMessage
   const ws = self as unknown as { postMessage(msg: object, transfer: Transferable[]): void };
-  ws.postMessage({ type, generation: game.generation, buffer }, [buffer.buffer]);
+  ws.postMessage({ type, generation: game.generation, buffer, changes }, [buffer.buffer]);
 }
